@@ -1,0 +1,11 @@
+# Data
+data/
+
+# CMake build
+build/
+
+# Claude code
+CLAUDE.md
+
+# Notes
+SCRATCH.md
