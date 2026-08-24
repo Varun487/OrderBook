@@ -3,6 +3,7 @@ data/
 
 # CMake build
 build/
+build-release/
 
 # Claude code
 CLAUDE.md

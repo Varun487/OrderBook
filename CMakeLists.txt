@@ -40,6 +40,8 @@ FetchContent_Declare(catch2
 )
 FetchContent_MakeAvailable(catch2)
 
-add_executable(tests tests/test_smoke.cpp)
+add_executable(tests 
+    tests/test_itch.cpp
+)
 target_link_libraries(tests PRIVATE orderbook Catch2::Catch2WithMain)
 target_compile_options(tests PRIVATE ${PROJECT_WARNINGS})
