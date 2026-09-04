@@ -1,5 +1,8 @@
 #pragma once
 
+#include <iostream>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstddef>
 #include <span>
@@ -46,5 +49,36 @@ namespace itch {
     // Whenever we touch memory directly (memcpy) we nee a swap. But, if we are
     // computing a value, we don't.
     std::uint64_t read_be48(const std::byte* p);
+
+    // Helper function for reading stock name
+    template <std::size_t N>
+    std::array<char, N> read_chars(const std::byte* p) {
+        std::array<char, N> a;
+        std::memcpy(a.data(), p, N);                                                                                                                                                                   
+        return a;
+    }
+
+    // Structs for each message type
+    // 'A' — Add order, 36 bytes (Refer section 1.3.1 in the spec)
+    struct AddOrder {
+        std::uint16_t stock_locate;
+        std::uint16_t tracking_number;
+        std::uint64_t timestamp;
+        std::uint64_t order_ref;
+        char side;
+        std::uint32_t shares;
+        std::array<char, 8> stock;
+        std::uint32_t price;
+    };
+
+    // 'F' — Add order mpid, 40 bytes (Refer section 1.3.2 in the spec)
+    struct AddOrderMpid {        // 'F' — 40 bytes on the wire                                                                                                      
+        AddOrder base;                                                                                                                                                                                 
+        std::array<char, 4> mpid; // 4 bytes
+    };
+
+    // Decode functions for the struct
+    AddOrder decode_add(const std::byte* p);
+    AddOrderMpid decode_add_mpid(const std::byte* p);
 
 } // namespace itch
