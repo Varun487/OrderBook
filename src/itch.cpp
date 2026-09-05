@@ -36,4 +36,97 @@ namespace itch {
             .mpid = itch::read_chars<4>(p + 36)
         };
     }
+
+    DeleteOrder decode_delete(const std::byte* p) { 
+        return DeleteOrder {
+            .stock_locate = itch::read_be<std::uint16_t>(p+1),
+            .tracking_number = itch::read_be<std::uint16_t>(p+3),
+            .timestamp = itch::read_be48(p+5),
+            .order_ref = itch::read_be<std::uint64_t>(p+11)
+        };
+    }
+
+    CancelOrder decode_cancel(const std::byte* p) { 
+        return CancelOrder {
+            .stock_locate = itch::read_be<std::uint16_t>(p+1),
+            .tracking_number = itch::read_be<std::uint16_t>(p+3),
+            .timestamp = itch::read_be48(p+5),
+            .order_ref = itch::read_be<std::uint64_t>(p+11),
+            .cancelled_shares = itch::read_be<std::uint32_t>(p+19)
+        };
+    }
+
+    ExecutedOrder decode_execute(const std::byte* p) {
+        return ExecutedOrder {
+            .stock_locate = itch::read_be<std::uint16_t>(p+1),
+            .tracking_number = itch::read_be<std::uint16_t>(p+3),
+            .timestamp = itch::read_be48(p+5),
+            .order_ref = itch::read_be<std::uint64_t>(p+11),
+            .executed_shares = itch::read_be<std::uint32_t>(p+19),
+            .match_number = itch::read_be<std::uint64_t>(p+23)
+        };
+    }
+
+    ExecutedWithPriceOrder decode_execute_with_price(const std::byte* p) {
+        return ExecutedWithPriceOrder {
+            .stock_locate = itch::read_be<std::uint16_t>(p+1),
+            .tracking_number = itch::read_be<std::uint16_t>(p+3),
+            .timestamp = itch::read_be48(p+5),
+            .order_ref = itch::read_be<std::uint64_t>(p+11),
+            .executed_shares = itch::read_be<std::uint32_t>(p+19),
+            .match_number = itch::read_be<std::uint64_t>(p+23),
+            .printable = std::to_integer<char>(p[31]),
+            .execution_price = itch::read_be<std::uint32_t>(p+32)
+        };
+    }
+    
+    ReplaceOrder decode_replace(const std::byte* p) {
+        return ReplaceOrder {
+            .stock_locate = itch::read_be<std::uint16_t>(p+1),
+            .tracking_number = itch::read_be<std::uint16_t>(p+3),
+            .timestamp = itch::read_be48(p+5),
+            .orig_order_ref = itch::read_be<std::uint64_t>(p+11),
+            .new_order_ref = itch::read_be<std::uint64_t>(p+19),
+            .shares = itch::read_be<std::uint32_t>(p+27),
+            .price = itch::read_be<std::uint32_t>(p+31)
+        };
+    }
+
+    bool valid_side(char side) {
+        return (side == 'B' || side == 'S');
+    }
+
+    bool valid_shares(std::uint32_t shares) {
+        return (shares != 0);
+    }
+
+    bool valid_price(std::uint32_t price) {
+        return (price != 0);
+    }
+
+    bool valid_stock(std::array<char, 8> stock) {
+        bool padding = false;
+        for (std::size_t k = 0; k < stock.size(); ++k) {
+            const char c = stock[k];
+
+            if (c == ' ') { padding = true; continue; }
+            if (padding) return false; // "AA PL   " — space then a char
+
+            const bool alpha = (c >= 'A' && c <= 'Z');
+            const bool punct = (c == '.' || c == '-' || c == '+' ||
+                                c == '=' || c == '^' || c == '*');
+
+            if (k == 0 ? !alpha : !(alpha || punct)) return false;
+        }
+        return stock[0] != ' '; // reject an all-space field    
+    }
+
+    bool valid_order_ref(std::uint64_t ref) {
+        return ref != 0;
+    }
+
+    bool valid_printable(char printable) {
+        return (printable == 'Y' || printable == 'N');
+    }
+
 } // namespace itch

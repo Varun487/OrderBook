@@ -1,12 +1,11 @@
 #pragma once
 
-#include <iostream>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstddef>
-#include <span>
 #include <cstring>
+#include <set>
+
 
 namespace itch {
 
@@ -58,8 +57,39 @@ namespace itch {
         return a;
     }
 
+    // Return expected length in bytes for each message type
+    // constexpr implies an inline function, which must be defined in hpp
+    constexpr std::size_t expected_size(std::uint8_t type) {
+        switch (type)
+        {
+            case 'A': return 36;  // Add Order (no MPID)
+            case 'F': return 40;  // Add Order with MPID
+            case 'E': return 31;  // Order Executed
+            case 'C': return 36;  // Order Executed with Price
+            case 'X': return 23;  // Order Cancel (partial reduction)
+            case 'D': return 19;  // Order Delete
+            case 'U': return 35;  // Order Replace
+            case 'P': return 44;  // Trade (non-cross)
+            case 'Q': return 40;  // Cross Trade
+            case 'B': return 19;  // Broken Trade
+            case 'S': return 12;  // System Event
+            case 'R': return 39;  // Stock Directory
+            case 'H': return 25;  // Stock Trading Action
+            case 'h': return 21;  // Operational Halt  (lowercase — not 'H')
+            case 'Y': return 20;  // Reg SHO Restriction
+            case 'L': return 26;  // Market Participant Position
+            case 'V': return 35;  // MWCB Decline Level
+            case 'W': return 12;  // MWCB Status
+            case 'K': return 28;  // IPO Quoting Period Update
+            case 'J': return 35;  // LULD Auction Collar
+            case 'I': return 50;  // NOII / imbalance
+            case 'N': return 20;  // Retail Price Improvement Indicator
+            default: return 0;
+        }
+    }
+
     // Structs for each message type
-    // 'A' — Add order, 36 bytes (Refer section 1.3.1 in the spec)
+    // A — Add order, 36 bytes (Refer section 1.3.1 in the spec)
     struct AddOrder {
         std::uint16_t stock_locate;
         std::uint16_t tracking_number;
@@ -71,14 +101,77 @@ namespace itch {
         std::uint32_t price;
     };
 
-    // 'F' — Add order mpid, 40 bytes (Refer section 1.3.2 in the spec)
+    // F — Add order mpid, 40 bytes (Refer section 1.3.2 in the spec)
     struct AddOrderMpid {        // 'F' — 40 bytes on the wire                                                                                                      
         AddOrder base;                                                                                                                                                                                 
-        std::array<char, 4> mpid; // 4 bytes
+        std::array<char, 4> mpid;
+    };
+
+    // D - Delete order, 19 bytes (Refer section 1.4.4 in the spec)
+    struct DeleteOrder {
+        std::uint16_t stock_locate;
+        std::uint16_t tracking_number;
+        std::uint64_t timestamp;
+        std::uint64_t order_ref;
+    };
+
+    // X - Cancel order, 23 bytes (Refer section 1.4.3 in the spec)
+    struct CancelOrder {
+        std::uint16_t stock_locate;
+        std::uint16_t tracking_number;
+        std::uint64_t timestamp;
+        std::uint64_t order_ref;
+        std::uint32_t cancelled_shares;
+    };
+
+    // E - Executed order, 31 bytes (Refer section 1.4.1 in the spec)
+    struct ExecutedOrder {
+        std::uint16_t stock_locate;
+        std::uint16_t tracking_number;
+        std::uint64_t timestamp;
+        std::uint64_t order_ref;
+        std::uint32_t executed_shares;
+        std::uint64_t match_number;
+    };
+
+    // C - Order Executed With Price, 36 bytes (Refer section 1.4.2 in the spec)
+    struct ExecutedWithPriceOrder {
+        std::uint16_t stock_locate;
+        std::uint16_t tracking_number;
+        std::uint64_t timestamp;
+        std::uint64_t order_ref;
+        std::uint32_t executed_shares;
+        std::uint64_t match_number;
+        char printable;        
+        std::uint32_t execution_price;
+    };
+
+    // U - Replace order, 35 bytes (Refer section 1.4.5 in the spec)
+    struct ReplaceOrder {
+        std::uint16_t stock_locate;
+        std::uint16_t tracking_number;
+        std::uint64_t timestamp;
+        std::uint64_t orig_order_ref;
+        std::uint64_t new_order_ref;
+        std::uint32_t shares;
+        std::uint32_t price;
     };
 
     // Decode functions for the struct
-    AddOrder decode_add(const std::byte* p);
-    AddOrderMpid decode_add_mpid(const std::byte* p);
+    AddOrder decode_add(const std::byte* p); // A
+    AddOrderMpid decode_add_mpid(const std::byte* p); // F
+    DeleteOrder decode_delete(const std::byte* p); // D
+    CancelOrder decode_cancel(const std::byte* p); // X
+    ExecutedOrder decode_execute(const std::byte* p); // E
+    ExecutedWithPriceOrder decode_execute_with_price(const std::byte* p); // C
+    ReplaceOrder decode_replace(const std::byte* p); // U
+
+    // Message validation functions
+    bool valid_side(char side);
+    bool valid_shares(std::uint32_t shares);
+    bool valid_price(std::uint32_t price);
+    bool valid_stock(std::array<char, 8> stock);
+    bool valid_order_ref(std::uint64_t ref);
+    bool valid_printable(char printable);
 
 } // namespace itch
