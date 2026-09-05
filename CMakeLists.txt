@@ -7,6 +7,9 @@ project(orderbook CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)   # error out rather than fall back to an older standard
 
+# Emit build/compile_commands.json so clangd knows the include path.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Warnings we want on every target we own (not on fetched dependencies).
 set(PROJECT_WARNINGS -Wall -Wextra)
 

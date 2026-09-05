@@ -98,6 +98,7 @@ int main(int argc, char** argv) {
                 flag(itch::valid_price(A.price) && 
                     itch::valid_shares(A.shares) && 
                     itch::valid_stock(A.stock) && 
+                    itch::valid_order_ref(A.order_ref) &&
                     itch::valid_side(A.side));
                 break;
             }
@@ -106,6 +107,7 @@ int main(int argc, char** argv) {
                 flag(itch::valid_price(F.base.price) && 
                     itch::valid_shares(F.base.shares) && 
                     itch::valid_stock(F.base.stock) && 
+                    itch::valid_order_ref(F.base.order_ref) &&
                     itch::valid_side(F.base.side));
                 break;
             }

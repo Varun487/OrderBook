@@ -354,3 +354,65 @@ TEST_CASE("'C' and 'E' decoders agree on their shared 31-byte prefix") {
     REQUIRE(as_e.executed_shares == as_c.executed_shares);
     REQUIRE(as_e.match_number == as_c.match_number);
 }
+
+// ---------------------------------------------------------------------------
+// expected_size tests.
+//
+// This is the guard that made the rotated-switch bug loud, and it is what the
+// driver trusts before handing a frame to a decoder. Restating the spec table
+// verbatim would only prove the test was copied from the same place as the
+// code, so most of what follows asserts the *relationships* the rest of the
+// codebase actually depends on. expected_size is constexpr, so a wrong answer
+// for a fixed type can fail at compile time rather than run time.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("expected_size covers the seven decoded types") {
+    // Each number is the last field's offset plus its width, read off the
+    // decoder in itch.cpp — not copied out of the spec table a second time.
+    STATIC_REQUIRE(itch::expected_size('A') == 36);  // price       at +32, 4 wide
+    STATIC_REQUIRE(itch::expected_size('F') == 40);  // mpid        at +36, 4 wide
+    STATIC_REQUIRE(itch::expected_size('D') == 19);  // order_ref   at +11, 8 wide
+    STATIC_REQUIRE(itch::expected_size('X') == 23);  // cancelled   at +19, 4 wide
+    STATIC_REQUIRE(itch::expected_size('E') == 31);  // match_num   at +23, 8 wide
+    STATIC_REQUIRE(itch::expected_size('C') == 36);  // exec_price  at +32, 4 wide
+    STATIC_REQUIRE(itch::expected_size('U') == 35);  // price       at +31, 4 wide
+}
+
+TEST_CASE("expected_size agrees with the decoders that share a prefix") {
+    // decode_add_mpid delegates to decode_add and then reads the MPID at +36.
+    // That read is only in bounds if 'F' is exactly 'A' plus the 4-byte MPID.
+    STATIC_REQUIRE(itch::expected_size('F') == itch::expected_size('A') + 4);
+
+    // 'C' is 'E' plus printable (1) and execution_price (4). Same invariant the
+    // "'C' and 'E' decoders agree" test above checks from the other side.
+    STATIC_REQUIRE(itch::expected_size('C') == itch::expected_size('E') + 5);
+}
+
+TEST_CASE("every known type is long enough to hold the common header") {
+    // The driver reads the timestamp at +5..+10 off *every* type it recognises,
+    // including the ones no decoder touches (P, Q, R, I...). A known type
+    // shorter than 11 bytes would make that read run past the frame. Checked at
+    // run time rather than with STATIC_REQUIRE so a failure names the type.
+    for (int t = 0; t < 256; ++t) {
+        const std::size_t size = itch::expected_size(static_cast<std::uint8_t>(t));
+        if (size == 0) continue;  // unknown type; the driver skips it
+        INFO("type '" << static_cast<char>(t) << "' (" << t << ")");
+        CHECK(size >= 11);
+    }
+}
+
+TEST_CASE("expected_size returns 0 for types the spec does not define") {
+    // 0 is the driver's "unknown, skip it" signal, not an error. Anything that
+    // is not a real ITCH type must land here rather than on a plausible size
+    // that would let a corrupt frame pass the length check.
+    STATIC_REQUIRE(itch::expected_size('G') == 0);
+    STATIC_REQUIRE(itch::expected_size('Z') == 0);
+    STATIC_REQUIRE(itch::expected_size(0x00) == 0);
+    STATIC_REQUIRE(itch::expected_size(0xFF) == 0);
+
+    // Lowercase is not a synonym for uppercase here: 'h' is Operational Halt
+    // and 'H' is Stock Trading Action — two different messages of two different
+    // sizes. 'a' is nothing at all.
+    STATIC_REQUIRE(itch::expected_size('a') == 0);
+    STATIC_REQUIRE(itch::expected_size('h') != itch::expected_size('H'));
+}
