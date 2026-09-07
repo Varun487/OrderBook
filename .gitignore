@@ -4,12 +4,17 @@ data/
 # CMake build
 build/
 build-release/
+.cache/
 
 # Claude code
 CLAUDE.md
 
 # Notes
 SCRATCH.md
+spec.txt
 
 # Clangd
 compile_commands.json
+
+# MacOS
+.DS_Store

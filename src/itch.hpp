@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <string_view>
 
 
 namespace itch {
@@ -54,6 +55,11 @@ namespace itch {
         std::array<char, N> a;
         std::memcpy(a.data(), p, N);                                                                                                                                                                   
         return a;
+    }
+
+    // Helper function to see if a char is present in a string
+    constexpr bool one_of(char c, std::string_view allowed) {
+        return allowed.find(c) != std::string_view::npos;
     }
 
     // Return expected length in bytes for each message type
@@ -141,7 +147,7 @@ namespace itch {
         std::uint64_t order_ref;
         std::uint32_t executed_shares;
         std::uint64_t match_number;
-        char printable;        
+        char printable;
         std::uint32_t execution_price;
     };
 
@@ -156,6 +162,27 @@ namespace itch {
         std::uint32_t price;
     };
 
+    // R - Stock Directory, 39 bytes (Refer section 1.2.1 in the spec)
+    struct StockDirectory {
+        std::uint16_t stock_locate;
+        std::uint16_t tracking_number;
+        std::uint64_t timestamp;
+        std::array<char, 8> stock;
+        char market_category;
+        char financial_status_indicator;
+        std::uint32_t round_lot_size;
+        char round_lots_only;
+        char issue_classification;
+        std::array<char, 2> issue_sub_type;
+        char authenticity;
+        char short_sale_threshold;
+        char ipo_flag;
+        char luld_reference_price_tier;
+        char etp_flag;
+        std::uint32_t etp_leverage_factor;
+        char inverse_indicator;
+    };
+
     // Decode functions for the struct
     AddOrder decode_add(const std::byte* p); // A
     AddOrderMpid decode_add_mpid(const std::byte* p); // F
@@ -164,6 +191,7 @@ namespace itch {
     ExecutedOrder decode_execute(const std::byte* p); // E
     ExecutedWithPriceOrder decode_execute_with_price(const std::byte* p); // C
     ReplaceOrder decode_replace(const std::byte* p); // U
+    StockDirectory decode_stock_directory(const std::byte* p); // R
 
     // Message validation functions
     bool valid_side(char side);
@@ -172,5 +200,6 @@ namespace itch {
     bool valid_stock(std::array<char, 8> stock);
     bool valid_order_ref(std::uint64_t ref);
     bool valid_printable(char printable);
+    bool valid_stock_directory(const StockDirectory& m);
 
 } // namespace itch

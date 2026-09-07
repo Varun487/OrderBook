@@ -356,6 +356,298 @@ TEST_CASE("'C' and 'E' decoders agree on their shared 31-byte prefix") {
 }
 
 // ---------------------------------------------------------------------------
+// 'R' — Stock Directory.
+//
+// R is not a book message: it establishes stock_locate -> symbol once, before
+// the session opens. Its value as a test is that bytes +19..+38 are almost all
+// single-character enums, so a one-byte offset slip garbles several fields at
+// once and the frame below catches it.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// This is a *decoder* fixture, not a validator fixture. The ten single-byte
+// enum fields carry ten pairwise-distinct values so a swapped pair of offsets
+// fails two assertions instead of none. Where the spec's legal set was already
+// spent by an earlier field, the byte here is a deliberate sentinel ('#', '@')
+// rather than a legal value: decode_stock_directory does no validation, so
+// reusing a legal 'Y' or 'N' would only weaken the test.
+constexpr std::array<std::byte, 39> kStockDirectoryFrame = {
+    std::byte{'R'},                                 // +0  message type
+    0x22_b, 0xCA_b,                                 // +1  stock_locate    = 8906
+    0x00_b, 0x05_b,                                 // +3  tracking_number = 5
+    0x0A_b, 0x1B_b, 0x2C_b, 0x3D_b, 0x4E_b, 0x5F_b, // +5  timestamp = 0x0A1B2C3D4E5F
+    std::byte{'T'}, std::byte{'S'},                 // +11 stock = "TSLA    "
+    std::byte{'L'}, std::byte{'A'},                 //     (space-padded to 8)
+    std::byte{' '}, std::byte{' '},                 //
+    std::byte{' '}, std::byte{' '},                 //
+    std::byte{'Q'},                                 // +19 market_category
+    std::byte{'D'},                                 // +20 financial_status_indicator
+    0x00_b, 0x00_b, 0x00_b, 0x64_b,                 // +21 round_lot_size = 100
+    std::byte{'Y'},                                 // +25 round_lots_only
+    std::byte{'B'},                                 // +26 issue_classification
+    std::byte{'E'}, std::byte{'U'},                 // +27 issue_sub_type = "EU"
+    std::byte{'T'},                                 // +29 authenticity
+    std::byte{'N'},                                 // +30 short_sale_threshold
+    std::byte{'Z'},                                 // +31 ipo_flag
+    std::byte{'2'},                                 // +32 luld_reference_price_tier
+    std::byte{'#'},                                 // +33 etp_flag           (sentinel)
+    0x00_b, 0x00_b, 0x00_b, 0x03_b,                 // +34 etp_leverage_factor = 3
+    std::byte{'@'},                                 // +38 inverse_indicator  (sentinel)
+};
+
+std::string_view as_view(const std::array<char, 2>& a) {
+    return std::string_view(a.data(), a.size());
+}
+
+} // namespace
+
+// Ties the fixture to the code's own size table rather than to the comment on
+// the line above it. Growing the struct without growing expected_size, or the
+// reverse, stops the build here.
+static_assert(kStockDirectoryFrame.size() == itch::expected_size('R'),
+              "the 'R' test frame must be exactly one wire frame long");
+
+TEST_CASE("decode_stock_directory reads every field of an 'R' frame") {
+    const itch::StockDirectory m =
+        itch::decode_stock_directory(kStockDirectoryFrame.data());
+
+    REQUIRE(m.stock_locate == 8906);
+    REQUIRE(m.tracking_number == 5);
+    REQUIRE(m.timestamp == 0x0A1B2C3D4E5FULL);
+    REQUIRE(as_view(m.stock) == "TSLA    ");
+    REQUIRE(m.market_category == 'Q');
+    REQUIRE(m.financial_status_indicator == 'D');
+    REQUIRE(m.round_lot_size == 100);
+    REQUIRE(m.round_lots_only == 'Y');
+    REQUIRE(m.issue_classification == 'B');
+    REQUIRE(as_view(m.issue_sub_type) == "EU");
+    REQUIRE(m.authenticity == 'T');
+    REQUIRE(m.short_sale_threshold == 'N');
+    REQUIRE(m.ipo_flag == 'Z');
+    REQUIRE(m.luld_reference_price_tier == '2');
+    REQUIRE(m.etp_flag == '#');
+    REQUIRE(m.etp_leverage_factor == 3);
+    REQUIRE(m.inverse_indicator == '@');
+}
+
+TEST_CASE("'R' single-byte fields are pairwise distinct in the fixture") {
+    // The property the fixture depends on. If someone edits a value above and
+    // collides two fields, the offset test silently weakens; this fails first.
+    const itch::StockDirectory m =
+        itch::decode_stock_directory(kStockDirectoryFrame.data());
+
+    const std::array<char, 10> flags = {
+        m.market_category, m.financial_status_indicator, m.round_lots_only,
+        m.issue_classification, m.authenticity, m.short_sale_threshold,
+        m.ipo_flag, m.luld_reference_price_tier, m.etp_flag, m.inverse_indicator
+    };
+
+    for (std::size_t a = 0; a < flags.size(); ++a)
+        for (std::size_t b = a + 1; b < flags.size(); ++b) {
+            INFO("fields " << a << " and " << b << " both hold '" << flags[a] << "'");
+            CHECK(flags[a] != flags[b]);
+        }
+}
+
+TEST_CASE("LULD reference price tier is a character, not an integer") {
+    const itch::StockDirectory m =
+        itch::decode_stock_directory(kStockDirectoryFrame.data());
+
+    // The spec types this field Alpha and gives its values as 1 and 2, but the
+    // bytes on the wire are '1' (0x31) and '2' (0x32). Comparing against the
+    // integer 2 compiles clean, warns about nothing, and is false for every
+    // message in the file. Same shape as `side`, which is 'B'/'S' and not 0/1.
+    REQUIRE(m.luld_reference_price_tier == '2');
+    REQUIRE(m.luld_reference_price_tier != 2);
+    REQUIRE(m.luld_reference_price_tier == 0x32);
+}
+
+TEST_CASE("issue_sub_type is two characters, not a big-endian u16") {
+    const itch::StockDirectory m =
+        itch::decode_stock_directory(kStockDirectoryFrame.data());
+
+    // Routing this field through read_be<uint16_t> would compile and would
+    // spell "UE". It is two independent codes from Appendix E, so it has to go
+    // through read_chars like `stock` and `mpid` do.
+    REQUIRE(m.issue_sub_type[0] == 'E');
+    REQUIRE(m.issue_sub_type[1] == 'U');
+    REQUIRE(as_view(m.issue_sub_type) != "UE");
+}
+
+TEST_CASE("the two 'R' integers are read at their own offsets") {
+    const itch::StockDirectory m =
+        itch::decode_stock_directory(kStockDirectoryFrame.data());
+
+    // round_lot_size at +21 sits between two single-char enums, and
+    // etp_leverage_factor at +34 is followed by one. Reading either a byte
+    // early or a byte late pulls a character into the low or high byte and the
+    // value stops being small.
+    REQUIRE(m.round_lot_size == 100);
+    REQUIRE(m.etp_leverage_factor == 3);
+}
+
+// ---------------------------------------------------------------------------
+// 'R' field validation.
+//
+// kStockDirectoryFrame above is deliberately not spec-legal — it trades legal
+// values for pairwise-distinct ones so it can catch offset drift. Validation
+// needs the opposite fixture: a record that is legal in every field, so a test
+// can make exactly one thing wrong at a time.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Every field spec-legal. Modelled on a plain Nasdaq-listed common stock.
+constexpr std::array<std::byte, 39> kLegalDirectoryFrame = {
+    std::byte{'R'},                                 // +0  message type
+    0x00_b, 0x01_b,                                 // +1  stock_locate    = 1
+    0x00_b, 0x00_b,                                 // +3  tracking_number = 0
+    0x00_b, 0x00_b, 0x00_b, 0x00_b, 0x00_b, 0x01_b, // +5  timestamp = 1
+    std::byte{'A'}, std::byte{'A'},                 // +11 stock = "AAPL    "
+    std::byte{'P'}, std::byte{'L'},                 //
+    std::byte{' '}, std::byte{' '},                 //
+    std::byte{' '}, std::byte{' '},                 //
+    std::byte{'Q'},                                 // +19 Nasdaq Global Select
+    std::byte{'N'},                                 // +20 Normal
+    0x00_b, 0x00_b, 0x00_b, 0x64_b,                 // +21 round_lot_size = 100
+    std::byte{'N'},                                 // +25 odd lots allowed
+    std::byte{'C'},                                 // +26 Common Stock
+    std::byte{' '}, std::byte{' '},                 // +27 issue_sub_type = blank
+    std::byte{'P'},                                 // +29 Live/Production
+    std::byte{'N'},                                 // +30 not restricted
+    std::byte{'N'},                                 // +31 not a new IPO
+    std::byte{'1'},                                 // +32 Tier 1  (character, not 1)
+    std::byte{'N'},                                 // +33 not an ETP
+    0x00_b, 0x00_b, 0x00_b, 0x00_b,                 // +34 etp_leverage_factor = 0
+    std::byte{'N'},                                 // +38 not inverse
+};
+
+// The ten single-character enum fields, by wire offset. Poking one of these is
+// how each test below makes exactly one thing wrong.
+constexpr std::array<std::size_t, 10> kFlagOffsets = {
+    19, 20, 25, 26, 29, 30, 31, 32, 33, 38
+};
+
+itch::StockDirectory decode_with(std::size_t offset, char value) {
+    auto frame = kLegalDirectoryFrame;   // copy; the fixture stays constexpr
+    frame[offset] = static_cast<std::byte>(value);
+    return itch::decode_stock_directory(frame.data());
+}
+
+} // namespace
+
+TEST_CASE("one_of matches membership, not ordering") {
+    STATIC_REQUIRE(itch::one_of('Q', "QGSNAPMZV"));
+    STATIC_REQUIRE(itch::one_of('V', "QGSNAPMZV"));   // last element
+    STATIC_REQUIRE(!itch::one_of('B', "QGSNAPMZV"));
+    STATIC_REQUIRE(!itch::one_of('q', "QGSNAPMZV"));  // case is significant
+
+    // The empty set accepts nothing, including the space that every caller
+    // tests for separately.
+    STATIC_REQUIRE(!itch::one_of(' ', ""));
+
+    // A space inside the set would work, but no caller spells it that way on
+    // purpose — see the note in valid_stock_directory.
+    STATIC_REQUIRE(itch::one_of(' ', " "));
+    STATIC_REQUIRE(!itch::one_of(' ', "YN"));
+}
+
+TEST_CASE("one_of does not treat a high byte as a member") {
+    // char is signed on both dev platforms. A byte >= 0x80 must not sign-extend
+    // into something that matches, and must not be UB the way std::isupper
+    // would be here.
+    const char high = static_cast<char>(0x8A);
+    REQUIRE(!itch::one_of(high, "QGSNAPMZV"));
+    REQUIRE(!itch::one_of(high, ""));
+}
+
+TEST_CASE("valid_stock_directory accepts a fully legal record") {
+    REQUIRE(itch::valid_stock_directory(
+        itch::decode_stock_directory(kLegalDirectoryFrame.data())));
+}
+
+TEST_CASE("valid_stock_directory rejects a bad value in any flag field") {
+    // '#' is in no allowed set and is not a space, so it is illegal for all ten
+    // fields. A field the validator forgot to check would pass here and name
+    // its own offset in the failure.
+    for (const std::size_t off : kFlagOffsets) {
+        INFO("offset +" << off);
+        CHECK_FALSE(itch::valid_stock_directory(decode_with(off, '#')));
+    }
+}
+
+TEST_CASE("valid_stock_directory allows <space> where the spec documents it") {
+    // Market Category, Financial Status, Short Sale Threshold, IPO Flag, LULD
+    // Tier and ETP Flag all list <space> as "not available" in section 1.2.1.
+    for (const std::size_t off : {19u, 20u, 30u, 31u, 32u, 33u}) {
+        INFO("offset +" << off);
+        CHECK(itch::valid_stock_directory(decode_with(off, ' ')));
+    }
+}
+
+TEST_CASE("valid_stock_directory rejects <space> where the spec documents none") {
+    // Round Lots Only (+25), Issue Classification (+26) and Inverse Indicator
+    // (+38) list no <space> value. These three allowed one for a while on the
+    // reasoning that the spec defines them only for a subset of issues — but a
+    // permission that never gets exercised is not knowledge, so they were
+    // tightened to the documented sets and the full-day run is what settles it.
+    //
+    // If a run ever rejects records here, that is a finding rather than a bug:
+    // put the space back for the field that needs it, and note which file
+    // carried it.
+    for (const std::size_t off : {25u, 26u, 38u}) {
+        INFO("offset +" << off);
+        CHECK_FALSE(itch::valid_stock_directory(decode_with(off, ' ')));
+    }
+}
+
+TEST_CASE("valid_stock_directory requires a real authenticity value") {
+    // The one flag field with no <space> escape. It is the only thing that
+    // separates a live issue from a test issue, so a blank one is a record we
+    // cannot interpret rather than a record with a field withheld.
+    CHECK(itch::valid_stock_directory(decode_with(29, 'P')));
+    CHECK(itch::valid_stock_directory(decode_with(29, 'T')));
+    CHECK_FALSE(itch::valid_stock_directory(decode_with(29, ' ')));
+}
+
+TEST_CASE("valid_stock_directory reads the LULD tier as a character") {
+    CHECK(itch::valid_stock_directory(decode_with(32, '1')));
+    CHECK(itch::valid_stock_directory(decode_with(32, '2')));
+
+    // The integers 1 and 2 are control bytes 0x01/0x02, not tiers.
+    CHECK_FALSE(itch::valid_stock_directory(decode_with(32, static_cast<char>(1))));
+    CHECK_FALSE(itch::valid_stock_directory(decode_with(32, static_cast<char>(2))));
+}
+
+TEST_CASE("valid_stock_directory knows the values a guess would miss") {
+    // 'M' is NYSE Texas and 'Z' is BATS Z — both real Market Category values
+    // that an from-memory list drops.
+    CHECK(itch::valid_stock_directory(decode_with(19, 'M')));
+    CHECK(itch::valid_stock_directory(decode_with(19, 'Z')));
+
+    // IPO Flag has a third value: 'Z', a non-IPO new listing. Y/N/space is the
+    // natural guess and would reject real records.
+    CHECK(itch::valid_stock_directory(decode_with(31, 'Z')));
+
+    // Financial Status 'C' was added to the spec after 5.0 shipped.
+    CHECK(itch::valid_stock_directory(decode_with(20, 'C')));
+}
+
+TEST_CASE("valid_stock_directory ignores the fields it does not police") {
+    // issue_sub_type is a ~40-code appendix, and neither integer has a
+    // documented zero rule, so none of them are validated. Asserting that here
+    // makes the omission a decision rather than an oversight.
+    auto frame = kLegalDirectoryFrame;
+    frame[27] = std::byte{'#'};   // issue_sub_type
+    frame[28] = std::byte{'#'};
+    frame[21] = std::byte{0xFF};  // round_lot_size, absurd but unpoliced
+    frame[34] = std::byte{0xFF};  // etp_leverage_factor
+
+    REQUIRE(itch::valid_stock_directory(itch::decode_stock_directory(frame.data())));
+}
+
+// ---------------------------------------------------------------------------
 // expected_size tests.
 //
 // This is the guard that made the rotated-switch bug loud, and it is what the
