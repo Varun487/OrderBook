@@ -20,6 +20,7 @@ set(PROJECT_WARNINGS -Wall -Wextra)
 add_library(orderbook STATIC
     src/itch.cpp
     src/mmap.cpp
+    src/book.cpp
 )
 # PUBLIC: anything linking against `orderbook` also gets src/ on its include
 # path, so drivers/tests can `#include "itch.hpp"` directly.
@@ -45,6 +46,7 @@ FetchContent_MakeAvailable(catch2)
 
 add_executable(tests 
     tests/test_itch.cpp
+    tests/test_book.cpp
 )
 target_link_libraries(tests PRIVATE orderbook Catch2::Catch2WithMain)
 target_compile_options(tests PRIVATE ${PROJECT_WARNINGS})
